@@ -3,7 +3,8 @@
 > **Duración objetivo:** ≤ 10:00
 > **Modalidad:** demostración en vivo, integrante único, cuenta AWS Academy
 > **Repo:** https://github.com/Yoyagm/eval-final-dgiti
-> **CI verde confirmado:** ✅ run 26136382712 · 1m46s · pytest 82% coverage
+> **ALB DNS desplegado:** `eval-final-dgiti-alb-217333176.us-east-1.elb.amazonaws.com`
+> **Versión del guion:** revisada con la infra real desplegada y validada
 
 ## Distribución por peso de rúbrica
 
@@ -18,18 +19,14 @@
 
 ---
 
-# 🧱 PARTE 0 — Una sola tarea pendiente (5 min, hazla ya)
+# 🧱 PARTE 0 — Una sola tarea pendiente (5 min)
 
 ## Exportar el diagrama a PNG
 
 1. Abre https://app.diagrams.net/
-2. **File → Open from → Device** → selecciona `docs/diagrama.drawio`
-3. Se ve el diagrama con iconos AWS 2026 oficiales
-4. **File → Export as → PNG**
-   - Zoom: **200%**
-   - Border: **20**
-   - Background: **White**
-   - Selection only: **No**
+2. **File → Open from → Device** → `docs/diagrama.drawio`
+3. Aparece el diagrama con iconos AWS 2026
+4. **File → Export as → PNG** (Zoom 200%, Border 20, Background White)
 5. Guarda como `docs/diagrama.png`
 6. Sube al repo:
    ```bash
@@ -39,542 +36,353 @@
    git push
    ```
 
-> Sin este PNG, la rúbrica de Arquitectura (10%) se ve afectada — el `.md` pide explícitamente "iconos oficiales de AWS 2026".
+---
+
+# 📋 PARTE 1 — Lo que ya está hecho ✓
+
+Lo siguiente ya está aplicado y validado. No hay que repetirlo:
+
+- ✅ AWS Academy Lab iniciado
+- ✅ Credenciales exportadas y guardadas en `~/.aws/credentials`
+- ✅ 4 secrets configurados en GitHub
+- ✅ `terraform apply` ejecutado exitosamente
+- ✅ Imagen Docker publicada en ghcr.io (pública)
+- ✅ App respondiendo en el ALB (`/health` → 200, `db=connected`)
+- ✅ 5 items sembrados en BD
+- ✅ `./scripts/test_endpoints.sh` → 8/8 PASS
+- ✅ CI verde confirmado
 
 ---
 
-# 📋 PARTE 1 — Preparación antes de grabar (~45 min, NO se graba)
+# 🚀 PARTE 1.5 — Lo último que falta antes de grabar
 
-## 1.1 · Iniciar Lab AWS Academy (5 min)
-
-1. Abre **AWS Academy** → tu curso → módulo → click **Start Lab**
-2. Espera el punto verde junto a "AWS" (puede tardar 2-4 min)
-3. Click **"AWS Details"** → arriba dice "AWS CLI" → click "Show"
-4. Verás 4 líneas: aws_access_key_id, aws_secret_access_key, aws_session_token, region
-5. Cópialas y pégalas en la terminal:
+## a) Disparar pipeline CI + CD para tener un run reciente
 
 ```bash
-# Pega aquí el contenido del bloque "AWS CLI":
-export AWS_ACCESS_KEY_ID="ASIA..."
-export AWS_SECRET_ACCESS_KEY="..."
-export AWS_SESSION_TOKEN="..."
-export AWS_REGION="us-east-1"
-
-# Verifica que funciona
-aws sts get-caller-identity
-# Debe responder con: "Account": "1234567890XX" (tu cuenta del Lab)
+gh workflow run ci.yml -R Yoyagm/eval-final-dgiti --ref main
+gh workflow run cd.yml -R Yoyagm/eval-final-dgiti --ref main
+sleep 8
+gh run list -R Yoyagm/eval-final-dgiti --limit 3
+# Espera ~4 min hasta que ambos terminen "success"
 ```
 
-⚠️ **NO cierres el Lab ni esta terminal hasta terminar de grabar.** Si lo cierras, las credenciales se invalidan.
-
-## 1.2 · Configurar secrets en GitHub (1 min)
-
-Con las credenciales ya exportadas en tu shell:
-
-```bash
-gh secret set AWS_REGION             --body "us-east-1"               -R Yoyagm/eval-final-dgiti
-gh secret set AWS_ACCESS_KEY_ID      --body "$AWS_ACCESS_KEY_ID"      -R Yoyagm/eval-final-dgiti
-gh secret set AWS_SECRET_ACCESS_KEY  --body "$AWS_SECRET_ACCESS_KEY"  -R Yoyagm/eval-final-dgiti
-gh secret set AWS_SESSION_TOKEN      --body "$AWS_SESSION_TOKEN"      -R Yoyagm/eval-final-dgiti
-
-# Verifica
-gh secret list -R Yoyagm/eval-final-dgiti
-# Deben aparecer los 4
-```
-
-## 1.3 · Terraform apply (15 min — RDS es lo lento)
-
-```bash
-cd ~/Desktop/infra/eval-final-dgiti/infra
-cp terraform.tfvars.example terraform.tfvars
-terraform init
-terraform apply -auto-approve
-# ⏱ 10-15 minutos. RDS Multi-AZ tarda ~8 min solo.
-```
-
-Cuando termine, ANOTA estos valores (los usarás en el video):
-```bash
-terraform output
-# Copia estos 3:
-ALB=$(terraform output -raw alb_dns_name)
-DASH=$(terraform output -raw cloudwatch_dashboard_url)
-ECR=$(terraform output -raw ecr_repository_url)
-echo "ALB:  $ALB"
-echo "DASH: $DASH"
-echo "ECR:  $ECR"
-```
-
-## 1.4 · Push imagen Docker a ECR (4 min)
+## b) Verificación final 1 min antes de grabar
 
 ```bash
 cd ~/Desktop/infra/eval-final-dgiti
-ECR_URL=$(cd infra && terraform output -raw ecr_repository_url)
-ECR_REGISTRY=$(echo "$ECR_URL" | cut -d/ -f1)
+export ALB=$(cd infra && terraform output -raw alb_dns_name)
+export DASH=$(cd infra && terraform output -raw cloudwatch_dashboard_url)
 
-aws ecr get-login-password --region us-east-1 \
-  | docker login --username AWS --password-stdin "$ECR_REGISTRY"
-
-docker build -t eval-final-dgiti:latest .
-docker tag eval-final-dgiti:latest "$ECR_URL:latest"
-docker push "$ECR_URL:latest"
+echo "ALB:       $(curl -so /dev/null -w '%{http_code}' http://$ALB/health)"
+echo "CI:        $(gh run list -R Yoyagm/eval-final-dgiti -w ci.yml -L 1 --json conclusion -q '.[0].conclusion')"
+echo "CD:        $(gh run list -R Yoyagm/eval-final-dgiti -w cd.yml -L 1 --json conclusion -q '.[0].conclusion')"
+echo "Diagrama:  $(test -f docs/diagrama.png && echo OK || echo FALTA)"
+echo ""
+echo "ALB URL:   http://$ALB"
+echo "DASH URL:  $DASH"
 ```
 
-## 1.5 · Esperar app healthy + seed (3 min)
-
-```bash
-ALB=$(cd infra && terraform output -raw alb_dns_name)
-
-# Espera a que las EC2 hagan pull y arranquen
-until curl -sf "http://$ALB/health" >/dev/null; do
-  echo "Esperando app..."; sleep 15
-done
-echo "✓ App respondiendo"
-
-# Datos demo
-./scripts/seed_data.sh
-
-# Suite de validación
-./scripts/test_endpoints.sh
-# Debe terminar: 8 pass • 0 fail
+Esperado:
 ```
-
-## 1.6 · Disparar pipeline para tener corrida verde (5 min)
-
-```bash
-cd ~/Desktop/infra/eval-final-dgiti
-git commit --allow-empty -m "ci: pre-grabación video"
-git push origin main
-
-# Monitorea
-gh run watch -R Yoyagm/eval-final-dgiti
-# Espera CI verde + CD verde (~5 min)
-```
-
-## 1.7 · Verificación final pre-grabación
-
-```bash
-# Todo debe pasar:
-echo "=== CHECKLIST FINAL ==="
-echo "ALB:    $(curl -so /dev/null -w '%{http_code}' http://$(cd infra && terraform output -raw alb_dns_name)/health)"
-echo "Diag:   $(test -f docs/diagrama.png && echo OK || echo FALTA)"
-echo "Repo:   $(gh repo view Yoyagm/eval-final-dgiti --json url -q .url)"
-echo "CI:     $(gh run list -R Yoyagm/eval-final-dgiti -w ci.yml -L 1 --json conclusion -q '.[0].conclusion')"
-echo "CD:     $(gh run list -R Yoyagm/eval-final-dgiti -w cd.yml -L 1 --json conclusion -q '.[0].conclusion')"
-```
-
-Salida esperada:
-```
-ALB:    200
-Diag:   OK
-Repo:   https://github.com/Yoyagm/eval-final-dgiti
-CI:     success
-CD:     success
+ALB:       200
+CI:        success
+CD:        success
+Diagrama:  OK
 ```
 
 ---
 
-# 🖥️ PARTE 2 — Setup físico (10 min antes de presionar REC)
+# 🖥️ PARTE 2 — Setup físico (10 min antes de REC)
 
 ## 2.1 · Pre-abrir 12 tabs en el navegador (en este orden)
 
-| # | URL | Para qué bloque |
+| # | URL | Para bloque |
 |---|---|---|
-| 1 | `docs/diagrama.png` (visor de imágenes) | Arquitectura |
-| 2 | https://us-east-1.console.aws.amazon.com/vpcconsole/home?region=us-east-1#vpcs: | IaC |
-| 3 | https://us-east-1.console.aws.amazon.com/ec2/home?region=us-east-1#LoadBalancers: | IaC |
-| 4 | https://us-east-1.console.aws.amazon.com/ec2/home?region=us-east-1#TargetGroups: | IaC + Desempeño |
-| 5 | https://us-east-1.console.aws.amazon.com/ec2/home?region=us-east-1#AutoScalingGroups: | IaC + CI/CD |
-| 6 | https://us-east-1.console.aws.amazon.com/rds/home?region=us-east-1#databases: | IaC |
-| 7 | https://us-east-1.console.aws.amazon.com/ec2/home?region=us-east-1#SecurityGroups: | IaC |
-| 8 | http://<ALB-DNS>/docs | Servicio |
-| 9 | https://github.com/Yoyagm/eval-final-dgiti/settings/secrets/actions | CI/CD |
-| 10 | https://github.com/Yoyagm/eval-final-dgiti/actions | CI/CD |
-| 11 | https://us-east-1.console.aws.amazon.com/ecr/repositories?region=us-east-1 | CI/CD |
-| 12 | (pegar el output de `terraform output -raw cloudwatch_dashboard_url`) | Desempeño |
+| 1 | `docs/diagrama.png` (visor) | Arquitectura |
+| 2 | `https://us-east-1.console.aws.amazon.com/vpcconsole/home?region=us-east-1#vpcs:` | IaC |
+| 3 | `https://us-east-1.console.aws.amazon.com/ec2/home?region=us-east-1#LoadBalancers:` | IaC |
+| 4 | `https://us-east-1.console.aws.amazon.com/ec2/home?region=us-east-1#TargetGroups:` | IaC + Desempeño |
+| 5 | `https://us-east-1.console.aws.amazon.com/ec2/home?region=us-east-1#Instances:` (filtrar `Project=eval-final-dgiti`) | IaC |
+| 6 | `https://us-east-1.console.aws.amazon.com/ec2/home?region=us-east-1#AutoScalingGroups:` | IaC + CI/CD |
+| 7 | `https://us-east-1.console.aws.amazon.com/ec2/home?region=us-east-1#SecurityGroups:` (filtrar `eval-final`) | IaC |
+| 8 | `http://eval-final-dgiti-alb-217333176.us-east-1.elb.amazonaws.com/docs` | Servicio |
+| 9 | `https://github.com/Yoyagm/eval-final-dgiti/settings/secrets/actions` | CI/CD |
+| 10 | `https://github.com/Yoyagm/eval-final-dgiti/actions` | CI/CD |
+| 11 | `https://github.com/users/Yoyagm/packages/container/eval-final-dgiti` | CI/CD (registry) |
+| 12 | El Dashboard CloudWatch — pega `terraform output -raw cloudwatch_dashboard_url` | Desempeño |
 
 ## 2.2 · Terminal
 
-- Tamaño: ocupando todo el ancho de la pantalla
-- Font size grande (≥16pt) para que se lea en el video
-- **Pane izquierdo**: para comandos
-- **Pane derecho**: durante k6, mostrará progreso de la carga
-- Directorio actual: `~/Desktop/infra/eval-final-dgiti`
-
 ```bash
 cd ~/Desktop/infra/eval-final-dgiti
-# Ten estas variables exportadas en la shell:
 export ALB=$(cd infra && terraform output -raw alb_dns_name)
 export DASH=$(cd infra && terraform output -raw cloudwatch_dashboard_url)
 echo "ALB=$ALB"
 echo "DASH=$DASH"
 ```
 
-## 2.3 · Webcam y audio
+- Tamaño grande (ocupando toda la pantalla)
+- Font ≥ 16pt
+- Pane izquierdo: comandos / Pane derecho: durante k6 mostrará progreso
 
-- Webcam encendida, esquina inferior derecha
-- Micrófono probado (di "uno dos tres" y verifica el nivel)
-- Apaga notificaciones de Mac (Do Not Disturb)
-- Cierra Slack, Mail, etc.
+## 2.3 · Webcam + audio
 
-## 2.4 · Cronómetro
-
-- Ten un cronómetro visible (segunda pantalla o reloj físico)
-- Marca cuando arrancas y vigila cada checkpoint
+- Webcam ON, esquina inferior derecha
+- Micrófono probado
+- **Do Not Disturb** activado
+- Cierra Slack, Mail, notificaciones
 
 ---
 
 # 🎥 PARTE 3 — Guion de grabación segundo a segundo
 
-> Las **frases entre comillas** son guía. Dilas con tus palabras, no las leas.
-> Los **comandos en bloques** son para copiar y pegar en tiempo real.
+> Frases entre comillas: guía. Dilas con tus palabras.
+> Bloques en código: comandos exactos a pegar.
 
 ---
 
-## ⏱ 00:00 — 00:30 · Intro + Arquitectura (peso 10%)
+## ⏱ 00:00 — 00:30 · Intro + Arquitectura (10%)
 
-### Pantalla: **Tab 1 (diagrama.png)** + webcam grande
-
-### Comando previo (no se graba):
-Ten `docs/diagrama.png` ya abierto en pantalla completa.
+### Pantalla: webcam grande + diagrama.png a pantalla completa
 
 ### Decir (≈25s):
 > "Hola, soy **Johan Rodríguez**. Como integrante único, voy a sustentar la evaluación final del curso de Diseño y Gestión de Infraestructura Tecnológica.
 >
-> Esta es la arquitectura que diseñé: una **VPC en us-east-1 con dos zonas de disponibilidad**. En las subredes públicas tengo el **Application Load Balancer** y el NAT Gateway; en las privadas, **dos instancias EC2** corriendo FastAPI tras un Auto Scaling Group, y una **RDS PostgreSQL Multi-AZ** completamente aislada de Internet.
+> Esta es la arquitectura: **VPC en us-east-1 con dos zonas de disponibilidad**. Subredes públicas para el **Application Load Balancer** y NAT; subredes privadas con **dos EC2 corriendo FastAPI** tras un Auto Scaling Group, y **PostgreSQL desplegado en dos EC2 dedicadas** — una primary y una replica con streaming replication, completamente aisladas de Internet.
 >
-> **ECR** almacena la imagen Docker, **GitHub Actions** maneja el CI/CD, y **CloudWatch** centraliza métricas, logs y alarmas. La seguridad se aplica con **tres Security Groups en cascada**, todos con principio de least-privilege."
+> **GitHub Container Registry** almacena la imagen Docker, **GitHub Actions** maneja el CI/CD, y **CloudWatch** centraliza métricas, logs y alarmas. La seguridad usa **tres Security Groups en cascada** con least-privilege."
 
-### Plan B
-Si el diagrama PNG no abre, mantén el .drawio abierto en draw.io y úsalo igual (el evaluador no nota la diferencia si el rendering es bueno).
+> 💡 **Por qué Postgres en EC2 y no RDS:** menciónalo brevemente si quieres reforzar criterio técnico — "el Lab Academy restringe servicios gestionados como RDS y ECR; implementé equivalentes funcionales manteniendo todos los requisitos no funcionales."
 
 ---
 
-## ⏱ 00:30 — 03:00 · Infraestructura como Código (peso 25%)
+## ⏱ 00:30 — 03:00 · Infraestructura como Código (25%)
 
-### Pantalla: terminal grande, alternando con tabs de AWS
+### 00:30 — Estructura del repo Terraform (20s)
 
-### 00:30 — Mostrar estructura del repo Terraform (20s)
-
-#### Comando:
 ```bash
-cd ~/Desktop/infra/eval-final-dgiti
 ls infra/
 ```
 
-#### Decir:
-> "El Terraform está organizado exactamente como pide la rúbrica: **provider.tf**, **variables.tf**, **main.tf**, **outputs.tf**, **terraform.tfvars.example** sin secretos, y **user_data.sh** que arranca el contenedor en cada EC2."
+> "Terraform organizado como pide la rúbrica: **provider.tf**, **variables.tf**, **main.tf**, **outputs.tf**, **terraform.tfvars.example** sin secretos, **user_data.sh** para las EC2 de la app, y **user_data_db_primary.sh** y **user_data_db_replica.sh** para el cluster de PostgreSQL."
 
-### 00:50 — Mostrar variables tipadas (15s)
+### 00:50 — Variables tipadas (10s)
 
-#### Comando:
 ```bash
 head -30 infra/variables.tf
 ```
 
-#### Decir:
-> "Las variables están tipadas, con descripciones y **validaciones**. Por ejemplo, `project_name` valida que sea kebab-case con expresión regular. No hay valores hardcoded."
+> "Variables tipadas, descritas, con **validaciones regex**. No hay valores hardcoded."
 
-### 01:05 — Init, validate, plan, output (45s)
+### 01:00 — init, validate, plan, output (50s)
 
-#### Comando:
 ```bash
 cd infra
-terraform init -upgrade | tail -8
+terraform init -upgrade | tail -5
 ```
+> "**init**: providers descargados."
 
-#### Decir:
-> "**terraform init** descarga los providers de AWS y random."
-
-#### Comando:
 ```bash
 terraform validate
 ```
+> "**validate**: configuración válida."
 
-#### Decir:
-> "**validate** confirma que la configuración es válida."
-
-#### Comando:
 ```bash
-terraform plan -out=tfplan | tail -15
+terraform plan | tail -10
 ```
+> "**plan**: el state está sincronizado con la realidad. Sin cambios pendientes."
 
-#### Decir:
-> "**plan** muestra que el state está sincronizado con la realidad — todo aplicado, sin cambios pendientes."
-
-#### Comando:
 ```bash
 terraform output
 ```
+> "**output**: DNS del ALB, URL del dashboard CloudWatch, IPs privadas de los nodos de BD marcadas como sensitive — los secretos nunca se imprimen en claro."
 
-#### Decir:
-> "**output** me da el DNS del ALB, la URL del dashboard de CloudWatch, y el endpoint de RDS marcado como **sensitive** — nunca se imprime el password en claro."
+### 01:50 — Tab 2 (VPC): mostrar VPC + 4 subredes (15s)
 
-### 01:50 — Tab 2 (VPC): mostrar VPC + subredes (15s)
+> "VPC con sus cuatro subredes: dos públicas en CIDR 10.0.1 y 10.0.2, dos privadas en 10.0.11 y 10.0.12. Cada una etiquetada con su Tier — public o private."
 
-#### Acción: cambia a **Tab 2 (VPC dashboard)**, click en tu VPC, menú lateral → **Subnets**
+### 02:05 — Tab 3 (ALB): mostrar listener (12s)
 
-#### Decir:
-> "En la consola está la VPC con sus **cuatro subredes**: dos públicas en CIDR 10.0.1 y 10.0.2 para el ALB y el NAT, y dos privadas en 10.0.11 y 10.0.12 para las EC2 y la RDS. Cada una etiquetada con su Tier."
+> "El ALB está active, internet-facing, con un listener HTTP en el puerto 80 que forwarda al target group."
 
-### 02:05 — Tab 3 (ALB): mostrar listener (15s)
+### 02:17 — Tab 4 (Target Group): 2 targets healthy (12s)
 
-#### Acción: **Tab 3 (Load Balancers)**, click ALB, pestaña **Listeners and rules**
+> "Los **dos targets están healthy**, uno en cada AZ — HA real, no teórica."
 
-#### Decir:
-> "El ALB está **active**, internet-facing, con un listener HTTP en el puerto 80 que forwarda al target group."
+### 02:29 — Tab 5 (Instances): mostrar las 4 EC2 (15s)
 
-### 02:20 — Tab 4 (Target Group): mostrar 2 healthy (15s)
+Filtra por `Project=eval-final-dgiti`. Verás 4 instancias.
 
-#### Acción: **Tab 4 (Target Groups)**, click TG `eval-final-dgiti-tg`, pestaña **Targets**
+> "Cuatro instancias EC2 corriendo: **dos para la aplicación** detrás del ALB, **una primary de PostgreSQL** en us-east-1a, **una replica de PostgreSQL** en us-east-1b — todo en subredes privadas, sin IPs públicas."
 
-#### Decir:
-> "Los **dos targets están healthy**, uno en us-east-1a y otro en us-east-1b — esta es la alta disponibilidad real, no teórica."
+### 02:44 — Tab 7 (Security Groups): mostrar 3 SGs (16s)
 
-### 02:35 — Tab 6 (RDS): mostrar Multi-AZ (15s)
+Filtra por `eval-final`. Click en `app-sg`, mostrar pestaña **Inbound rules**.
 
-#### Acción: **Tab 6 (RDS)**, click la instancia, pestaña **Configuration**
-
-#### Decir:
-> "La RDS está **available**, **Multi-AZ: Yes** que es la réplica síncrona, storage encriptado, y **publicly accessible: No** — solo se alcanza desde la subred privada vía el Security Group de la app. Cumple el requisito de réplica con acceso restringido."
-
-### 02:50 — Tab 7 (Security Groups): mostrar 3 SGs (10s)
-
-#### Acción: **Tab 7 (Security Groups)**, filtra por `eval-final`
-
-#### Decir:
-> "Y los **tres Security Groups en cascada**: el ALB acepta del mundo en 80; la app **solo del ALB** en 8000; la BD **solo de la app** en 5432. Least-privilege en cada capa."
-
-### Plan B IaC
-- Si `terraform plan` muestra cambios inesperados → "diferencias cosméticas que no afectan funcionalidad, sigo".
-- Si la consola carga lento → ten capturas previas (`docs/screenshots/`) listas como fallback.
+> "Tres Security Groups en cascada. El **app-sg** acepta tráfico solo desde el **alb-sg** en el puerto 8000. El **db-sg** acepta tráfico solo desde el **app-sg** en el puerto 5432, y tiene una regla self para permitir la replicación entre los nodos de BD. Least-privilege en cada capa."
 
 ---
 
-## ⏱ 03:00 — 04:00 · Servicio desplegado (peso 10%)
-
-### Pantalla: terminal + navegador (Swagger)
+## ⏱ 03:00 — 04:00 · Servicio desplegado (10%)
 
 ### 03:00 — curl al health (15s)
 
-#### Comando:
 ```bash
 curl -s "http://$ALB/health" | jq
 ```
 
-#### Decir:
-> "El endpoint **`/health`** responde 200 con verificación de la conexión a la base de datos. La estructura es estándar — campo `data` con el estado, campo `meta` con el request ID propagado."
+> "El endpoint `/health` responde 200 con la verificación de la conexión a la base de datos. La estructura es `data` con el estado y `meta` con el request ID propagado."
 
-### 03:15 — Script de validación (25s)
+### 03:15 — Suite de validación (25s)
 
-#### Comando:
 ```bash
 ./scripts/test_endpoints.sh
 ```
 
-#### Decir mientras corre:
-> "Este script valida **8 escenarios**: root, health, OpenAPI schema, listado, creación válida con 201, validación pydantic que devuelve 422, 404 cuando no existe, y paginación. **Latencia por request**, con colores. Todos en verde."
+> "Este script valida **8 escenarios**: root, health, OpenAPI schema, listado, creación 201, validación pydantic 422, 404 cuando no existe, y paginación. Latencia por request en colores. **8 de 8 en verde**."
 
-### 03:40 — Tab 8 (Swagger): hacer POST en vivo (15s)
+### 03:40 — Tab 8 (Swagger): POST en vivo (15s)
 
-#### Acción: **Tab 8** (`http://$ALB/docs`)
-- Click en **POST /api/items** → **Try it out**
-- En el body cambiar el `name` por "Demo en vivo"
-- Click **Execute**
+En `http://$ALB/docs`:
+- Click **POST /api/items** → **Try it out**
+- En body: `{"name": "Demo en vivo durante video", "description": "creado desde Swagger"}`
+- **Execute**
 
-#### Decir:
-> "FastAPI expone Swagger interactivo. Hago un POST en vivo desde el navegador — la app responde **201** con el item creado y su ID auto-generado."
+> "FastAPI expone Swagger interactivo. Hago un POST en vivo desde el navegador. La app responde 201 con el item creado y su ID auto-generado por PostgreSQL."
 
-### 03:55 — Mostrar EC2 instances + logs (5s)
+### 03:55 — Cerrar bloque (5s)
 
-#### Acción rápida: **Tab 5 (ASG)** → click la ASG → pestaña **Instance management**
-
-#### Decir:
-> "Las dos instancias EC2 están **InService** en distintas AZs."
-
-### Plan B
-- Si curl falla: `until curl -sf http://$ALB/health; do sleep 5; done` y reintenta.
-- Si Swagger no carga: usa **Postman** (importa `postman/eval-final-dgiti.postman_collection.json`).
+> "Y eso se persiste en la base de datos real — no es una BD en memoria."
 
 ---
 
-## ⏱ 04:00 — 06:30 · Pipeline CI/CD (peso 25%)
-
-### Pantalla: GitHub Actions + AWS ECR
+## ⏱ 04:00 — 06:30 · Pipeline CI/CD (25%)
 
 ### 04:00 — Mostrar workflows (15s)
 
-#### Comando:
 ```bash
 ls .github/workflows/
 ```
 
-#### Decir:
-> "Tres workflows con responsabilidades separadas: **ci.yml** hace lint con ruff y tests con pytest en cada PR; **cd.yml** construye la imagen y la publica en ECR cuando hay merge en main; **terraform-plan.yml** valida cambios de infraestructura en pull requests."
+> "Tres workflows: **ci.yml** hace lint con ruff y tests con pytest en cada PR; **cd.yml** construye la imagen Docker y la publica en **GitHub Container Registry**; **terraform-plan.yml** valida cambios de infraestructura."
 
-### 04:15 — Tab 9 (Secrets): mostrar 4 secrets (15s)
+### 04:15 — Tab 9 (Secrets): 4 secrets (15s)
 
-#### Acción: **Tab 9** (Settings → Secrets and variables → Actions)
+> "**Cuatro secrets** configurados en GitHub: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, y AWS_REGION. Valores enmascarados — las credenciales nunca aparecen en los YAML."
 
-#### Decir:
-> "**Cuatro secrets configurados**, valores enmascarados. AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN porque Academy rota credenciales, y AWS_REGION. Las credenciales nunca aparecen en el YAML."
+### 04:30 — Disparar pipeline (10s)
 
-### 04:30 — Disparar pipeline en vivo (10s)
-
-#### Comando:
 ```bash
-git commit --allow-empty -m "ci: demo en vivo durante grabación"
-git push origin main
+gh workflow run ci.yml -R Yoyagm/eval-final-dgiti --ref main
+gh workflow run cd.yml -R Yoyagm/eval-final-dgiti --ref main
 ```
 
-#### Decir:
-> "Hago un commit vacío y push para disparar el pipeline en vivo."
+> "Disparo los pipelines manualmente con `workflow_dispatch` — útil para re-ejecuciones sin necesidad de hacer un push."
 
-### 04:40 — Tab 10 (Actions): ver runs corriendo (90s)
+### 04:40 — Tab 10 (Actions): pipelines corriendo (90s)
 
-#### Acción: **Tab 10** (Actions), click el run más reciente
-
-#### Decir mientras avanza:
-> "Aquí está **CI corriendo**: arranca con **ruff** para lint, después **pytest** con cobertura del **82%**, finalmente un sanity build de Docker. Tiempo total **alrededor de dos minutos**.
+> "Aquí está el pipeline corriendo. **CI** arranca con ruff para lint, luego pytest con cobertura del **82%**, finalmente un sanity build de Docker. Tiempo total **alrededor de dos minutos**.
 >
-> En paralelo **CD se dispara**: configura las credenciales de AWS Academy, hace login a ECR, construye la imagen con cache de capas de Docker para ser rápido, y la publica con **dos tags** — `latest` y el SHA corto del commit para trazabilidad."
+> En paralelo **CD**: configura credenciales AWS para el segundo job, hace login en ghcr.io con el GITHUB_TOKEN, construye con cache de capas, y publica con **dos tags** — latest y el SHA del commit para trazabilidad."
 
-### 06:00 — Tab 11 (ECR): mostrar imagen pusheada (15s)
+### 06:10 — Tab 11 (GitHub Packages): mostrar imagen (15s)
 
-#### Acción: **Tab 11** (ECR), click repo `eval-final-dgiti`
+> "Aquí está la **imagen publicada en GHCR**, pública para que las EC2 hagan pull sin login, con el tag del SHA del commit y latest."
 
-#### Decir:
-> "Aquí está la **imagen recién publicada** con el tag del SHA del commit, **scan de vulnerabilidades** automático activado, y lifecycle policy que mantiene solo las últimas 10."
+### 06:25 — Tab 6 (ASG): instance refresh (5s)
 
-### 06:15 — Tab 5 (ASG): instance refresh (15s)
-
-#### Acción: **Tab 5** (ASG), pestaña **Instance refresh**
-
-#### Decir:
-> "El pipeline también dispara un **instance refresh rolling** del Auto Scaling Group — mantiene al menos el 50% de instancias healthy en todo momento. Despliegue **zero-downtime** sin tocar Terraform en runtime."
-
-### Plan B CI/CD
-- Si las credenciales rotaron y CD falla → di "credenciales del Lab rotaron, normalmente las refresco antes de cada sesión", y muestra el **run anterior verde** (de la preparación) — la rúbrica es satisfecha igual.
+> "El segundo job del CD también dispara un **instance refresh rolling** en el Auto Scaling Group, manteniendo el 50% de instancias healthy. Despliegue zero-downtime."
 
 ---
 
-## ⏱ 06:30 — 09:30 · Desempeño y monitoreo (peso 30% — **EL BLOQUE MÁS IMPORTANTE**)
+## ⏱ 06:30 — 09:30 · Desempeño y monitoreo (30%) — **EL BLOQUE MÁS IMPORTANTE**
 
 ### Pantalla: split-screen — terminal con k6 + Tab 12 (Dashboard CloudWatch)
 
 ### 06:30 — Lanzar k6 (15s)
 
-#### Comando:
 ```bash
 BASE_URL="http://$ALB" k6 run load/load_test.js
 ```
 
-#### Decir:
-> "Lanzo una prueba de carga con **k6**: ramp-up de 30 segundos hasta 50 usuarios virtuales, sostener 50 VUs durante 2 minutos, ramp-down de 30 segundos. **Mix realista de tráfico: 70% lecturas, 20% creaciones, 10% health checks**. Cinco thresholds que **fallan el test** si se exceden — p95 bajo 1.5 segundos y error rate bajo 5%."
+> "Lanzo una prueba de carga con **k6**: ramp-up de 30 segundos hasta **50 usuarios virtuales**, sostener 50 VUs durante 2 minutos, ramp-down de 30 segundos. **Mix realista: 70% lecturas, 20% creaciones, 10% health checks**. Cinco thresholds que fallan el test si se exceden — p95 bajo 1.5 segundos y error rate bajo 5%."
 
-### 06:45 — Tab 12 (Dashboard CloudWatch): fila 1 ALB (45s)
+### 06:45 — Tab 12 (Dashboard): fila 1 ALB (45s)
 
-#### Acción: cambia a **Tab 12 (Dashboard)** en split-screen, foco en la primera fila
+> "En CloudWatch ven cómo **RequestCount sube en sincronía** con el ramp-up. **TargetResponseTime p95** se mantiene bajo el umbral. **Cero errores 5XX**. Y los **dos targets healthy** estables — la infra absorbe la carga."
 
-#### Decir mientras crece la carga:
-> "Vean cómo en CloudWatch el **RequestCount sube en sincronía** con el ramp-up de k6. El **TargetResponseTime p95 se mantiene controlado**. **Cero errores 5XX**. Y los **dos targets healthy** estables — la infra absorbe la carga sin tumbarse."
+### 07:30 — Tab 12: fila 2 (CPU per instance) — **MOMENTO CRÍTICO** (60s)
 
-### 07:30 — **El momento crítico**: balanceo visible (60s)
+Scroll a la fila 2 del dashboard.
 
-#### Acción: scroll a la **segunda fila** del dashboard (EC2 per instance)
+> "**Aquí está la prueba del balanceador funcionando**: en CPU por instancia hay **dos líneas paralelas casi pegadas** — el ALB distribuye el tráfico entre las dos instancias en proporción cercana al **50/50**. Si una sola instancia recibiera todo, vería una línea al 100% y la otra plana. Lo mismo en NetworkIn y NetworkOut: tráfico equilibrado."
 
-#### Decir lento y claro:
-> "**Aquí está la prueba del balanceador funcionando**: en el panel de **CPU por instancia** hay **dos líneas que suben en paralelo, casi pegadas** — el ALB está distribuyendo el tráfico entre las dos instancias en proporción cercana al **50/50**. Si una sola instancia recibiera todo, vería una línea al 100% y la otra plana. Lo mismo con **NetworkIn**: ambas reciben tráfico equilibrado."
+### 08:30 — Tab 12: fila 3 (DB primary vs replica) (30s)
 
-#### Acción opcional refuerzo: **Tab 4 (Target Group)** → pestaña **Monitoring**
+Scroll a la fila 3.
 
-#### Decir:
-> "El target group lo confirma: ambos targets reciben requests en paralelo."
-
-### 08:30 — Tab 12: fila 3 RDS (30s)
-
-#### Acción: scroll a la **tercera fila** (RDS)
-
-#### Decir:
-> "La **RDS** absorbe la carga: **DatabaseConnections** sube proporcional a los POSTs, pero la CPU se mantiene tranquila, lejos del umbral del 80% de la alarma. La memoria estable y las latencias normales."
+> "Aquí comparo el comportamiento de la **base de datos primary contra la replica**. El primary recibe escrituras del 20% del tráfico POST, vean cómo su NetworkOut crece — porque está enviando el WAL al replica vía streaming replication. La CPU se mantiene controlada en ambos nodos, lejos del umbral del 80% de la alarma."
 
 ### 09:00 — Resumen k6 (20s)
 
-#### Acción: vuelve al terminal cuando k6 termine, muestra el summary
+Vuelve al terminal.
 
-#### Decir leyendo los números reales:
-> "Resultado: aproximadamente **N requests**, **p95 de X milisegundos**, **error rate de Y por ciento**, **Z items creados**. **Todos los thresholds aprobados**. La infraestructura cumple los requisitos no funcionales bajo carga sostenida."
+> "Resultado: **N requests**, **p95 de X milisegundos**, **error rate de Y por ciento**, **Z items creados**. **Todos los thresholds aprobados**. La infraestructura cumple los requisitos no funcionales bajo carga sostenida."
 
 ### 09:20 — Alarmas OK (10s)
 
-#### Acción: **Tab 12 (Dashboard)** o CloudWatch Alarms
-
-#### Decir:
-> "Y las **cuatro alarmas** que configuré — 5XX altos, healthy hosts, CPU EC2 y CPU RDS — se mantuvieron en **estado OK** durante toda la prueba."
-
-### Plan B Desempeño
-- Si k6 no se instala a tiempo → `ab -n 2000 -c 50 http://$ALB/api/items` con Apache Bench (preinstalado en macOS).
-- Si el dashboard sale vacío → ajusta el **time range** a "Last 15 minutes" arriba a la derecha.
-- Si las métricas tardan en aparecer → "CloudWatch agrega métricas con uno o dos minutos de delay, ya las verán" y avanza con la pestaña **Monitoring** del target group.
+> "Y las **cuatro alarmas** — 5XX altos, healthy hosts bajo, CPU EC2 app alto y CPU DB primary alto — permanecieron en **estado OK** durante toda la prueba."
 
 ---
 
 ## ⏱ 09:30 — 10:00 · Cierre (30s)
 
-### Pantalla: webcam grande + Tab del repo
+### Pantalla: webcam grande + tab del repo
 
-### Decir:
-> "Repositorio público en **github.com/Yoyagm/eval-final-dgiti**. Toda la infraestructura como código, el servicio FastAPI con **19 tests y 82% de cobertura**, el pipeline CI/CD, los scripts de validación, la prueba de carga y la observabilidad están versionados.
+> "Repositorio público en **github.com/Yoyagm/eval-final-dgiti**. Toda la infraestructura como código, el servicio con **19 tests y 82% de cobertura**, los tres workflows de CI/CD, los scripts de validación, la prueba de carga y la observabilidad están versionados.
 >
-> Para cumplir buenas prácticas con AWS Academy, al cerrar este video ejecuto **terraform destroy** y cierro el Lab. Gracias **profesor Omar Pinzón**."
+> Para cumplir buenas prácticas con AWS Academy, al cerrar este video ejecuto **terraform destroy**. Gracias **profesor Omar Pinzón**."
 
-### Comando opcional (mientras hablas, no esperes que termine):
+### Opcional final:
 ```bash
 cd ~/Desktop/infra/eval-final-dgiti/infra
 terraform destroy -auto-approve &
-# Solo muestra que arranca, corta video al ver "Destroying..."
+# Muestra que arranca y corta video
 ```
 
 ---
 
 # 🧹 PARTE 4 — Post-grabación
 
-## 4.1 · Destroy responsable
-
-Si no lo lanzaste durante el cierre:
 ```bash
 cd ~/Desktop/infra/eval-final-dgiti/infra
 terraform destroy -auto-approve
-# ⏱ ~10 min. Espera a que termine
+# ~10 min, espera a que termine
 ```
 
-Cierra el Lab en AWS Academy (botón "End Lab").
+Cerrar el Lab AWS Academy.
 
-## 4.2 · Revisión del video
+## Checklist revisión video
 
 - [ ] Duración ≤ 10:00
-- [ ] Audio audible y sincronizado
-- [ ] Mi cara visible en intro y cierre
-- [ ] Se ven outputs reales de Terraform (no diapositivas)
-- [ ] Se ve la consola de AWS Academy con MI cuenta
-- [ ] Se ve el dashboard de CloudWatch con métricas
-- [ ] Se ven las **dos líneas paralelas** de CPU per instance (clave para el 30%)
-- [ ] Se ven los workflows verdes en GitHub Actions
-- [ ] Se ve el SHA del commit coincidiendo entre GitHub y ECR
-- [ ] `terraform destroy` corriendo (al menos iniciándose)
-
-## 4.3 · Entrega
-
-- Sube el video al medio que pida el docente (drive, sharepoint, etc.)
-- Comparte el link al repo: https://github.com/Yoyagm/eval-final-dgiti
-- Confirma que el repo es público (lo es, ya verificado)
+- [ ] Audio claro y sincronizado
+- [ ] Cara visible en intro y cierre
+- [ ] Outputs reales de Terraform (no slides)
+- [ ] Consola AWS Academy con MI cuenta visible
+- [ ] Dashboard CloudWatch con métricas reales durante k6
+- [ ] **Dos líneas paralelas de CPU per instance** visibles (clave 30%)
+- [ ] **Dos líneas separadas DB primary vs replica** visibles
+- [ ] Workflows verdes en GitHub Actions
+- [ ] SHA del commit coincidiendo entre GitHub Actions y GHCR
+- [ ] `terraform destroy` iniciando
 
 ---
 
 # 🆘 Plan B global
 
-Si algo falla en VIVO y no se arregla en 30 segundos: **reconoce el problema con calma, explica qué debería pasar, y avanza al siguiente bloque**. La rúbrica valora la comprensión técnica, no la perfección. "Esto debería responder X, déjenme saltar al siguiente bloque por tiempo" es **mil veces mejor** que congelarse buscando el fix.
+Si algo falla en VIVO y no se arregla en 30s: **reconoce el problema, explica qué debería pasar, y avanza al siguiente bloque**. La rúbrica valora comprensión técnica, no perfección.
 
-Si NADA funciona en AWS (Lab caído, red mala): graba sobre lo construido localmente con `docker compose up` — cubres servicio + tests + CI/CD verde en GitHub, perdiendo solo el bloque AWS visual.
+Si NADA funciona en AWS: graba sobre lo construido localmente con `docker compose up` — cubres servicio + tests + CI/CD verde en GitHub. Solo perderías el bloque AWS visual.
 
 ---
 
@@ -589,15 +397,21 @@ export DASH=$(cd infra && terraform output -raw cloudwatch_dashboard_url)
 curl -s "http://$ALB/health" | jq
 ./scripts/test_endpoints.sh
 gh run list -R Yoyagm/eval-final-dgiti --limit 5
+
+# Disparar pipelines manualmente
+gh workflow run ci.yml -R Yoyagm/eval-final-dgiti --ref main
+gh workflow run cd.yml -R Yoyagm/eval-final-dgiti --ref main
+
+# Carga
+BASE_URL="http://$ALB" k6 run load/load_test.js
+
+# Ver target health del ALB
 aws elbv2 describe-target-health \
   --target-group-arn $(aws elbv2 describe-target-groups \
     --names eval-final-dgiti-tg --query 'TargetGroups[0].TargetGroupArn' --output text)
 
-# Disparar pipeline
-git commit --allow-empty -m "ci: trigger" && git push
-
-# Carga
-BASE_URL="http://$ALB" k6 run load/load_test.js
+# Ver consola de output de una instancia (debug user_data)
+aws ec2 get-console-output --instance-id <ID> --region us-east-1 | tail -80
 
 # Limpieza
 cd infra && terraform destroy -auto-approve
