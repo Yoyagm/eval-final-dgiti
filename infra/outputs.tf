@@ -21,9 +21,9 @@ output "swagger_url" {
   value       = "http://${aws_lb.this.dns_name}/docs"
 }
 
-output "ecr_repository_url" {
-  description = "URL del repositorio ECR (push de imágenes Docker)"
-  value       = aws_ecr_repository.app.repository_url
+output "container_image" {
+  description = "Imagen Docker publica que despliegan las EC2 (ghcr.io)"
+  value       = var.container_image
 }
 
 output "vpc_id" {

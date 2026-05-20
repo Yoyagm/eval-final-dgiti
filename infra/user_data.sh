@@ -8,49 +8,31 @@ echo "=== eval-final-dgiti bootstrap iniciado ==="
 # Variables inyectadas por Terraform via templatefile
 # ----------------------------------------------------------------------------
 AWS_REGION="${aws_region}"
-ECR_REPO_URL="${ecr_repo_url}"
-IMAGE_TAG="${image_tag}"
+CONTAINER_IMAGE="${container_image}"
 DATABASE_URL='${database_url}'
 APP_PORT="${app_port}"
 LOG_GROUP="${log_group}"
 
 # ----------------------------------------------------------------------------
-# Instalar Docker y AWS CLI (Amazon Linux 2023 trae cli v2 preinstalado)
+# Instalar Docker (Amazon Linux 2023)
 # ----------------------------------------------------------------------------
 dnf update -y
 dnf install -y docker amazon-cloudwatch-agent
 systemctl enable --now docker
 
 # ----------------------------------------------------------------------------
-# Login a ECR (LabRole de AWS Academy ya tiene AmazonEC2ContainerRegistryReadOnly)
+# Pull con retry — la imagen es publica en ghcr.io, no requiere login.
+# Si el primer apply ocurre antes de que el pipeline publique, se reintenta.
 # ----------------------------------------------------------------------------
-ECR_REGISTRY="$(echo "$ECR_REPO_URL" | cut -d/ -f1)"
-echo "Autenticando en ECR registry: $ECR_REGISTRY"
+echo "Esperando imagen publica: $CONTAINER_IMAGE"
 
-# Retry login hasta 5 veces (LabRole tarda unos segundos en propagar)
-for i in 1 2 3 4 5; do
-  if aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"; then
-    echo "Login ECR OK en intento $i"
-    break
-  fi
-  echo "Intento $i de login ECR falló, reintentando en 10s..."
-  sleep 10
-done
-
-# ----------------------------------------------------------------------------
-# Pull con retry — la imagen puede no existir aún si es el primer apply
-# (CI/CD la subirá; el contenedor se levantará cuando aparezca)
-# ----------------------------------------------------------------------------
-IMAGE_REF="$ECR_REPO_URL:$IMAGE_TAG"
-echo "Esperando imagen Docker: $IMAGE_REF"
-
-until docker pull "$IMAGE_REF"; do
-  echo "Imagen no disponible aún; reintentando en 30s..."
+until docker pull "$CONTAINER_IMAGE"; do
+  echo "Imagen no disponible aun; reintentando en 30s..."
   sleep 30
 done
 
 # ----------------------------------------------------------------------------
-# CloudWatch Agent para logs de docker (stdout/stderr → CW Logs)
+# CloudWatch Agent para logs del contenedor (stdout/stderr -> CW Logs)
 # ----------------------------------------------------------------------------
 cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<EOF
 {
@@ -81,10 +63,10 @@ EOF
   -a fetch-config \
   -m ec2 \
   -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json \
-  -s || echo "CloudWatch Agent no disponible (continuamos sin él)"
+  -s || echo "CloudWatch Agent no disponible (continuamos sin el)"
 
 # ----------------------------------------------------------------------------
-# Levantar el contenedor de la app
+# Levantar el contenedor
 # ----------------------------------------------------------------------------
 docker rm -f eval-app 2>/dev/null || true
 
@@ -95,8 +77,7 @@ docker run -d \
   -e DATABASE_URL="$DATABASE_URL" \
   -e ENVIRONMENT=production \
   -e LOG_LEVEL=INFO \
-  -e APP_VERSION="$IMAGE_TAG" \
-  "$IMAGE_REF"
+  "$CONTAINER_IMAGE"
 
 echo "=== Contenedor eval-app levantado en puerto $APP_PORT ==="
 docker ps

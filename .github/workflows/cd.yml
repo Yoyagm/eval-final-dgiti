@@ -17,41 +17,28 @@ on:
 
 permissions:
   contents: read
+  packages: write
 
 concurrency:
   group: cd-main
   cancel-in-progress: false
 
 env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
   AWS_REGION: ${{ secrets.AWS_REGION }}
-  ECR_REPOSITORY: eval-final-dgiti
   ASG_NAME: eval-final-dgiti-asg
 
 jobs:
   build-and-push:
-    name: Build & push to ECR
+    name: Build & push to GHCR
     runs-on: ubuntu-latest
     outputs:
-      image_uri: ${{ steps.build.outputs.image_uri }}
+      image_uri: ${{ steps.emit.outputs.image_uri }}
       image_tag: ${{ steps.tag.outputs.image_tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Configure AWS credentials (Academy session token)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Verify caller identity
-        run: aws sts get-caller-identity
-
-      - name: Login to Amazon ECR
-        id: ecr-login
-        uses: aws-actions/amazon-ecr-login@v2
 
       - name: Resolve image tag
         id: tag
@@ -65,6 +52,13 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build and push image
         id: build
         uses: docker/build-push-action@v5
@@ -72,19 +66,25 @@ jobs:
           context: .
           push: true
           tags: |
-            ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
-            ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.tag.outputs.image_tag }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.image_tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
 
-      - name: Emit image URI
+      - name: Emit image URI and summary
+        id: emit
         run: |
-          IMAGE_URI="${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.tag.outputs.image_tag }}"
+          IMAGE_URI="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.image_tag }}"
           echo "image_uri=$IMAGE_URI" >> $GITHUB_OUTPUT
-          echo "## 🐳 Imagen publicada" >> $GITHUB_STEP_SUMMARY
-          echo "- \`$IMAGE_URI\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest\`" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## 🐳 Imagen publicada en GHCR"
+            echo "- \`$IMAGE_URI\`"
+            echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest\`"
+            echo ""
+            echo "> Si es el primer push, marca el package como **public** en"
+            echo "> github.com/Yoyagm?tab=packages para que las EC2 puedan hacer pull sin login."
+          } >> $GITHUB_STEP_SUMMARY
 
   refresh-asg:
     name: Trigger ASG instance refresh
@@ -123,7 +123,9 @@ jobs:
             --preferences '{"MinHealthyPercentage":50,"InstanceWarmup":120}' \
             --query 'InstanceRefreshId' --output text)
           echo "Instance refresh iniciado: $REFRESH_ID"
-          echo "## ♻️ ASG Instance Refresh" >> $GITHUB_STEP_SUMMARY
-          echo "- ASG: \`${{ env.ASG_NAME }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- Refresh ID: \`$REFRESH_ID\`" >> $GITHUB_STEP_SUMMARY
-          echo "- Nueva imagen: \`${{ needs.build-and-push.outputs.image_uri }}\`" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## ♻️ ASG Instance Refresh"
+            echo "- ASG: \`${{ env.ASG_NAME }}\`"
+            echo "- Refresh ID: \`$REFRESH_ID\`"
+            echo "- Nueva imagen: \`${{ needs.build-and-push.outputs.image_uri }}\`"
+          } >> $GITHUB_STEP_SUMMARY

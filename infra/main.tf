@@ -161,11 +161,11 @@ resource "aws_security_group" "alb" {
 
 resource "aws_security_group" "app" {
   name        = "${local.name_prefix}-app-sg"
-  description = "App EC2 — acepta solo desde el ALB"
+  description = "App EC2 - accepts only from ALB"
   vpc_id      = aws_vpc.this.id
 
   ingress {
-    description     = "Tráfico desde ALB únicamente"
+    description     = "Traffic from ALB only"
     from_port       = var.app_port
     to_port         = var.app_port
     protocol        = "tcp"
@@ -173,7 +173,7 @@ resource "aws_security_group" "app" {
   }
 
   egress {
-    description = "Salida HTTPS (ECR, paquetes, SSM)"
+    description = "Egress HTTPS to registry and packages"
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
@@ -181,7 +181,7 @@ resource "aws_security_group" "app" {
   }
 
   egress {
-    description = "Salida HTTP (yum, etc.)"
+    description = "Egress HTTP for yum updates"
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
@@ -189,7 +189,7 @@ resource "aws_security_group" "app" {
   }
 
   egress {
-    description = "Salida a Postgres"
+    description = "Egress to Postgres in VPC"
     from_port   = 5432
     to_port     = 5432
     protocol    = "tcp"
@@ -203,11 +203,11 @@ resource "aws_security_group" "app" {
 
 resource "aws_security_group" "db" {
   name        = "${local.name_prefix}-db-sg"
-  description = "RDS — acepta solo desde el SG de la app"
+  description = "RDS - accepts only from app SG"
   vpc_id      = aws_vpc.this.id
 
   ingress {
-    description     = "Postgres desde la app únicamente"
+    description     = "Postgres from app only"
     from_port       = 5432
     to_port         = 5432
     protocol        = "tcp"
@@ -217,46 +217,6 @@ resource "aws_security_group" "db" {
   tags = {
     Name = "${local.name_prefix}-db-sg"
   }
-}
-
-###############################################################################
-# ECR — registro de imágenes Docker
-###############################################################################
-resource "aws_ecr_repository" "app" {
-  name                 = local.name_prefix
-  image_tag_mutability = "MUTABLE"
-  force_delete         = true
-
-  image_scanning_configuration {
-    scan_on_push = true
-  }
-
-  encryption_configuration {
-    encryption_type = "AES256"
-  }
-
-  tags = {
-    Name = "${local.name_prefix}-ecr"
-  }
-}
-
-resource "aws_ecr_lifecycle_policy" "app" {
-  repository = aws_ecr_repository.app.name
-
-  policy = jsonencode({
-    rules = [{
-      rulePriority = 1
-      description  = "Mantener solo las últimas 10 imágenes"
-      selection = {
-        tagStatus   = "any"
-        countType   = "imageCountMoreThan"
-        countNumber = 10
-      }
-      action = {
-        type = "expire"
-      }
-    }]
-  })
 }
 
 ###############################################################################
@@ -376,12 +336,11 @@ locals {
   database_url = "postgresql+asyncpg://${var.db_username}:${random_password.db.result}@${aws_db_instance.this.address}:5432/${var.db_name}"
 
   user_data_rendered = base64encode(templatefile("${path.module}/user_data.sh", {
-    aws_region   = var.aws_region
-    ecr_repo_url = aws_ecr_repository.app.repository_url
-    image_tag    = var.ecr_image_tag
-    database_url = local.database_url
-    app_port     = var.app_port
-    log_group    = aws_cloudwatch_log_group.app.name
+    aws_region      = var.aws_region
+    container_image = var.container_image
+    database_url    = local.database_url
+    app_port        = var.app_port
+    log_group       = aws_cloudwatch_log_group.app.name
   }))
 }
 

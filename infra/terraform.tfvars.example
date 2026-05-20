@@ -24,4 +24,4 @@ db_name             = "items"
 db_username         = "appuser"
 db_engine_version   = "15.7"
 
-ecr_image_tag = "latest"
+container_image = "ghcr.io/yoyagm/eval-final-dgiti:latest"

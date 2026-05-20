@@ -133,10 +133,11 @@ variable "db_engine_version" {
 }
 
 ###############################################################################
-# ECR
+# Container registry (GitHub Container Registry — ghcr.io)
+# AWS Academy LabRole no permite crear ECR, por eso se usa ghcr.io publico.
 ###############################################################################
-variable "ecr_image_tag" {
-  description = "Tag de la imagen Docker a desplegar"
+variable "container_image" {
+  description = "Imagen Docker publica a desplegar (registry/owner/repo:tag)"
   type        = string
-  default     = "latest"
+  default     = "ghcr.io/yoyagm/eval-final-dgiti:latest"
 }
