@@ -27,6 +27,16 @@ data "aws_ami" "amazon_linux_2023" {
   }
 }
 
+# Para construir widgets de CloudWatch con métricas por instancia del ASG
+data "aws_instances" "app_nodes" {
+  instance_tags = {
+    "aws:autoscaling:groupName" = aws_autoscaling_group.app.name
+  }
+  instance_state_names = ["running"]
+
+  depends_on = [aws_autoscaling_group.app]
+}
+
 ###############################################################################
 # RED — VPC, subredes, IGW, NAT, route tables
 ###############################################################################
@@ -654,12 +664,14 @@ resource "aws_cloudwatch_dashboard" "main" {
         width  = 8
         height = 6
         properties = {
-          title  = "EC2 · CPUUtilization por instancia (balanceo visible)"
+          title  = "EC2 app · CPUUtilization por instancia (balanceo visible)"
           region = var.aws_region
           period = 60
+          stat   = "Average"
           view   = "timeSeries"
           metrics = [
-            [{ expression = "SEARCH('{AWS/EC2,InstanceId,AutoScalingGroupName} MetricName=\"CPUUtilization\" AutoScalingGroupName=\"${aws_autoscaling_group.app.name}\"', 'Average', 60)", label = "$${PROP('InstanceId')}", id = "e1" }]
+            for id in data.aws_instances.app_nodes.ids :
+            ["AWS/EC2", "CPUUtilization", "InstanceId", id]
           ]
         }
       },
@@ -670,12 +682,14 @@ resource "aws_cloudwatch_dashboard" "main" {
         width  = 8
         height = 6
         properties = {
-          title  = "EC2 · NetworkIn por instancia (tráfico entrante)"
+          title  = "EC2 app · NetworkIn por instancia (tráfico entrante)"
           region = var.aws_region
           period = 60
+          stat   = "Sum"
           view   = "timeSeries"
           metrics = [
-            [{ expression = "SEARCH('{AWS/EC2,InstanceId,AutoScalingGroupName} MetricName=\"NetworkIn\" AutoScalingGroupName=\"${aws_autoscaling_group.app.name}\"', 'Sum', 60)", label = "$${PROP('InstanceId')}", id = "e2" }]
+            for id in data.aws_instances.app_nodes.ids :
+            ["AWS/EC2", "NetworkIn", "InstanceId", id]
           ]
         }
       },
@@ -686,12 +700,14 @@ resource "aws_cloudwatch_dashboard" "main" {
         width  = 8
         height = 6
         properties = {
-          title  = "EC2 · NetworkOut por instancia (respuestas)"
+          title  = "EC2 app · NetworkOut por instancia (respuestas)"
           region = var.aws_region
           period = 60
+          stat   = "Sum"
           view   = "timeSeries"
           metrics = [
-            [{ expression = "SEARCH('{AWS/EC2,InstanceId,AutoScalingGroupName} MetricName=\"NetworkOut\" AutoScalingGroupName=\"${aws_autoscaling_group.app.name}\"', 'Sum', 60)", label = "$${PROP('InstanceId')}", id = "e3" }]
+            for id in data.aws_instances.app_nodes.ids :
+            ["AWS/EC2", "NetworkOut", "InstanceId", id]
           ]
         }
       },
