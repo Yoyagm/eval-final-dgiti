@@ -232,7 +232,8 @@ resource "aws_cloudwatch_log_group" "app" {
 }
 
 ###############################################################################
-# RDS — PostgreSQL Multi-AZ en subredes privadas
+# AURORA PostgreSQL Serverless v2 — writer + reader replica en subredes privadas
+# (AWS Academy bloquea rds:CreateDBInstance pero permite rds:CreateDBCluster)
 ###############################################################################
 resource "random_password" "db" {
   length           = 24
@@ -249,28 +250,47 @@ resource "aws_db_subnet_group" "this" {
   }
 }
 
-resource "aws_db_instance" "this" {
-  identifier              = "${local.name_prefix}-db"
-  engine                  = "postgres"
+resource "aws_rds_cluster" "this" {
+  cluster_identifier      = "${local.name_prefix}-aurora"
+  engine                  = "aurora-postgresql"
   engine_version          = var.db_engine_version
-  instance_class          = var.db_instance_class
-  allocated_storage       = var.db_allocated_storage
-  storage_type            = "gp3"
-  storage_encrypted       = true
-  db_name                 = var.db_name
-  username                = var.db_username
-  password                = random_password.db.result
+  engine_mode             = "provisioned"
+  database_name           = var.db_name
+  master_username         = var.db_username
+  master_password         = random_password.db.result
   db_subnet_group_name    = aws_db_subnet_group.this.name
   vpc_security_group_ids  = [aws_security_group.db.id]
-  multi_az                = true
-  publicly_accessible     = false
+  storage_encrypted       = true
   skip_final_snapshot     = true
   deletion_protection     = false
   backup_retention_period = 1
   apply_immediately       = true
 
+  serverlessv2_scaling_configuration {
+    min_capacity = 0.5
+    max_capacity = 2.0
+  }
+
   tags = {
-    Name = "${local.name_prefix}-rds"
+    Name = "${local.name_prefix}-aurora-cluster"
+  }
+}
+
+# Dos instancias: writer (primary) + reader (replica de lectura)
+resource "aws_rds_cluster_instance" "this" {
+  count                = 2
+  identifier           = "${local.name_prefix}-aurora-${count.index}"
+  cluster_identifier   = aws_rds_cluster.this.id
+  instance_class       = "db.serverless"
+  engine               = aws_rds_cluster.this.engine
+  engine_version       = aws_rds_cluster.this.engine_version
+  db_subnet_group_name = aws_db_subnet_group.this.name
+  publicly_accessible  = false
+  apply_immediately    = true
+
+  tags = {
+    Name = "${local.name_prefix}-aurora-instance-${count.index}"
+    Role = count.index == 0 ? "writer" : "reader"
   }
 }
 
@@ -333,7 +353,7 @@ resource "aws_lb_listener" "http" {
 # LAUNCH TEMPLATE + AUTO SCALING GROUP
 ###############################################################################
 locals {
-  database_url = "postgresql+asyncpg://${var.db_username}:${random_password.db.result}@${aws_db_instance.this.address}:5432/${var.db_name}"
+  database_url = "postgresql+asyncpg://${var.db_username}:${random_password.db.result}@${aws_rds_cluster.this.endpoint}:5432/${var.db_name}"
 
   user_data_rendered = base64encode(templatefile("${path.module}/user_data.sh", {
     aws_region      = var.aws_region
@@ -490,7 +510,7 @@ resource "aws_cloudwatch_metric_alarm" "rds_cpu_high" {
   alarm_description   = "CPU RDS > 80% por 2 minutos — investigar queries"
 
   dimensions = {
-    DBInstanceIdentifier = aws_db_instance.this.id
+    DBInstanceIdentifier = aws_rds_cluster_instance.this[0].identifier
   }
 }
 
@@ -637,7 +657,7 @@ resource "aws_cloudwatch_dashboard" "main" {
           period = 60
           view   = "timeSeries"
           metrics = [
-            ["AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", aws_db_instance.this.id]
+            ["AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", aws_rds_cluster_instance.this[0].identifier]
           ]
         }
       },
@@ -654,7 +674,7 @@ resource "aws_cloudwatch_dashboard" "main" {
           period = 60
           view   = "timeSeries"
           metrics = [
-            ["AWS/RDS", "DatabaseConnections", "DBInstanceIdentifier", aws_db_instance.this.id]
+            ["AWS/RDS", "DatabaseConnections", "DBInstanceIdentifier", aws_rds_cluster_instance.this[0].identifier]
           ]
         }
       },
@@ -671,7 +691,7 @@ resource "aws_cloudwatch_dashboard" "main" {
           period = 60
           view   = "timeSeries"
           metrics = [
-            ["AWS/RDS", "FreeableMemory", "DBInstanceIdentifier", aws_db_instance.this.id]
+            ["AWS/RDS", "FreeableMemory", "DBInstanceIdentifier", aws_rds_cluster_instance.this[0].identifier]
           ]
         }
       },
@@ -688,7 +708,7 @@ resource "aws_cloudwatch_dashboard" "main" {
           period = 60
           view   = "timeSeries"
           metrics = [
-            ["AWS/RDS", "ReadLatency", "DBInstanceIdentifier", aws_db_instance.this.id],
+            ["AWS/RDS", "ReadLatency", "DBInstanceIdentifier", aws_rds_cluster_instance.this[0].identifier],
             [".", "WriteLatency", ".", "."]
           ]
         }

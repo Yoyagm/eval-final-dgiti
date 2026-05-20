@@ -127,9 +127,9 @@ variable "db_username" {
 }
 
 variable "db_engine_version" {
-  description = "Versión del engine PostgreSQL"
+  description = "Versión del engine Aurora PostgreSQL"
   type        = string
-  default     = "15.7"
+  default     = "15.10"
 }
 
 ###############################################################################

@@ -53,13 +53,13 @@ output "cloudwatch_log_group" {
 
 output "rds_endpoint" {
   description = "Endpoint privado de RDS PostgreSQL (no accesible desde Internet)"
-  value       = aws_db_instance.this.address
+  value       = aws_rds_cluster.this.endpoint
   sensitive   = true
 }
 
 output "rds_database_name" {
   description = "Nombre de la base de datos creada"
-  value       = aws_db_instance.this.db_name
+  value       = aws_rds_cluster.this.database_name
 }
 
 output "db_password" {
