@@ -232,65 +232,117 @@ resource "aws_cloudwatch_log_group" "app" {
 }
 
 ###############################################################################
-# AURORA PostgreSQL Serverless v2 — writer + reader replica en subredes privadas
-# (AWS Academy bloquea rds:CreateDBInstance pero permite rds:CreateDBCluster)
+# BASE DE DATOS — PostgreSQL primary + replica en EC2 dedicadas
+# (AWS Academy bloquea RDS y Aurora. Cumplimos requisito de "BD con réplica
+# y acceso restringido a infra privada" desplegando 2 EC2 con postgres:15
+# en docker en subredes privadas distintas y streaming replication.)
 ###############################################################################
 resource "random_password" "db" {
   length           = 24
   special          = true
-  override_special = "!#$%&*+-=?"
+  override_special = "!#$*+-=?"
 }
 
-resource "aws_db_subnet_group" "this" {
-  name       = "${local.name_prefix}-db-subnet-group"
-  subnet_ids = aws_subnet.private[*].id
+resource "random_password" "replication" {
+  length           = 24
+  special          = true
+  override_special = "!#$*+-=?"
+}
+
+# SG adicional: permitir replicacion entre db_primary y db_replica
+resource "aws_security_group_rule" "db_self_replication" {
+  type                     = "ingress"
+  from_port                = 5432
+  to_port                  = 5432
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.db.id
+  source_security_group_id = aws_security_group.db.id
+  description              = "Replication between db nodes"
+}
+
+resource "aws_security_group_rule" "db_egress_all" {
+  type              = "egress"
+  from_port         = 0
+  to_port           = 0
+  protocol          = "-1"
+  security_group_id = aws_security_group.db.id
+  cidr_blocks       = ["0.0.0.0/0"]
+  description       = "Egress for docker pull and updates"
+}
+
+# Primary database (writer)
+resource "aws_instance" "db_primary" {
+  ami                         = data.aws_ami.amazon_linux_2023.id
+  instance_type               = var.db_instance_class_ec2
+  subnet_id                   = aws_subnet.private[0].id
+  vpc_security_group_ids      = [aws_security_group.db.id]
+  iam_instance_profile        = var.instance_profile_name
+  associate_public_ip_address = false
+
+  metadata_options {
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 2
+    http_endpoint               = "enabled"
+  }
+
+  root_block_device {
+    volume_size           = 20
+    volume_type           = "gp3"
+    encrypted             = true
+    delete_on_termination = true
+  }
+
+  user_data = base64encode(templatefile("${path.module}/user_data_db_primary.sh", {
+    db_username          = var.db_username
+    db_password          = random_password.db.result
+    db_name              = var.db_name
+    replication_password = random_password.replication.result
+    vpc_cidr             = var.vpc_cidr
+    log_group            = aws_cloudwatch_log_group.app.name
+    aws_region           = var.aws_region
+  }))
 
   tags = {
-    Name = "${local.name_prefix}-db-subnet-group"
+    Name = "${local.name_prefix}-db-primary"
+    Role = "db-primary"
   }
 }
 
-resource "aws_rds_cluster" "this" {
-  cluster_identifier      = "${local.name_prefix}-aurora"
-  engine                  = "aurora-postgresql"
-  engine_version          = var.db_engine_version
-  engine_mode             = "provisioned"
-  database_name           = var.db_name
-  master_username         = var.db_username
-  master_password         = random_password.db.result
-  db_subnet_group_name    = aws_db_subnet_group.this.name
-  vpc_security_group_ids  = [aws_security_group.db.id]
-  storage_encrypted       = true
-  skip_final_snapshot     = true
-  deletion_protection     = false
-  backup_retention_period = 1
-  apply_immediately       = true
+# Replica (read replica via streaming replication)
+resource "aws_instance" "db_replica" {
+  ami                         = data.aws_ami.amazon_linux_2023.id
+  instance_type               = var.db_instance_class_ec2
+  subnet_id                   = aws_subnet.private[1].id
+  vpc_security_group_ids      = [aws_security_group.db.id]
+  iam_instance_profile        = var.instance_profile_name
+  associate_public_ip_address = false
 
-  serverlessv2_scaling_configuration {
-    min_capacity = 0.5
-    max_capacity = 2.0
+  metadata_options {
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 2
+    http_endpoint               = "enabled"
   }
 
-  tags = {
-    Name = "${local.name_prefix}-aurora-cluster"
+  root_block_device {
+    volume_size           = 20
+    volume_type           = "gp3"
+    encrypted             = true
+    delete_on_termination = true
   }
-}
 
-# Dos instancias: writer (primary) + reader (replica de lectura)
-resource "aws_rds_cluster_instance" "this" {
-  count                = 2
-  identifier           = "${local.name_prefix}-aurora-${count.index}"
-  cluster_identifier   = aws_rds_cluster.this.id
-  instance_class       = "db.serverless"
-  engine               = aws_rds_cluster.this.engine
-  engine_version       = aws_rds_cluster.this.engine_version
-  db_subnet_group_name = aws_db_subnet_group.this.name
-  publicly_accessible  = false
-  apply_immediately    = true
+  user_data = base64encode(templatefile("${path.module}/user_data_db_replica.sh", {
+    db_username          = var.db_username
+    replication_password = random_password.replication.result
+    primary_ip           = aws_instance.db_primary.private_ip
+    log_group            = aws_cloudwatch_log_group.app.name
+    aws_region           = var.aws_region
+  }))
+
+  depends_on = [aws_instance.db_primary]
 
   tags = {
-    Name = "${local.name_prefix}-aurora-instance-${count.index}"
-    Role = count.index == 0 ? "writer" : "reader"
+    Name = "${local.name_prefix}-db-replica"
+    Role = "db-replica"
   }
 }
 
@@ -353,7 +405,7 @@ resource "aws_lb_listener" "http" {
 # LAUNCH TEMPLATE + AUTO SCALING GROUP
 ###############################################################################
 locals {
-  database_url = "postgresql+asyncpg://${var.db_username}:${random_password.db.result}@${aws_rds_cluster.this.endpoint}:5432/${var.db_name}"
+  database_url = "postgresql+asyncpg://${var.db_username}:${random_password.db.result}@${aws_instance.db_primary.private_ip}:5432/${var.db_name}"
 
   user_data_rendered = base64encode(templatefile("${path.module}/user_data.sh", {
     aws_region      = var.aws_region
@@ -497,20 +549,20 @@ resource "aws_cloudwatch_metric_alarm" "ec2_cpu_high" {
   }
 }
 
-resource "aws_cloudwatch_metric_alarm" "rds_cpu_high" {
-  alarm_name          = "${local.name_prefix}-rds-cpu-high"
+resource "aws_cloudwatch_metric_alarm" "db_cpu_high" {
+  alarm_name          = "${local.name_prefix}-db-cpu-high"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 2
   metric_name         = "CPUUtilization"
-  namespace           = "AWS/RDS"
+  namespace           = "AWS/EC2"
   period              = 60
   statistic           = "Average"
   threshold           = 80
   treat_missing_data  = "notBreaching"
-  alarm_description   = "CPU RDS > 80% por 2 minutos — investigar queries"
+  alarm_description   = "CPU del DB primary > 80% por 2 minutos - investigar queries"
 
   dimensions = {
-    DBInstanceIdentifier = aws_rds_cluster_instance.this[0].identifier
+    InstanceId = aws_instance.db_primary.id
   }
 }
 
@@ -648,68 +700,53 @@ resource "aws_cloudwatch_dashboard" "main" {
         type   = "metric"
         x      = 0
         y      = 12
-        width  = 6
+        width  = 8
         height = 6
         properties = {
-          title  = "RDS · CPUUtilization"
+          title  = "DB · CPUUtilization (primary vs replica)"
           region = var.aws_region
           stat   = "Average"
           period = 60
           view   = "timeSeries"
           metrics = [
-            ["AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", aws_rds_cluster_instance.this[0].identifier]
+            ["AWS/EC2", "CPUUtilization", "InstanceId", aws_instance.db_primary.id, { label = "primary" }],
+            ["...", aws_instance.db_replica.id, { label = "replica" }]
           ]
         }
       },
       {
         type   = "metric"
-        x      = 6
+        x      = 8
         y      = 12
-        width  = 6
+        width  = 8
         height = 6
         properties = {
-          title  = "RDS · DatabaseConnections"
+          title  = "DB · NetworkIn (lectura desde la app + replicacion)"
           region = var.aws_region
-          stat   = "Average"
+          stat   = "Sum"
           period = 60
           view   = "timeSeries"
           metrics = [
-            ["AWS/RDS", "DatabaseConnections", "DBInstanceIdentifier", aws_rds_cluster_instance.this[0].identifier]
+            ["AWS/EC2", "NetworkIn", "InstanceId", aws_instance.db_primary.id, { label = "primary" }],
+            ["...", aws_instance.db_replica.id, { label = "replica" }]
           ]
         }
       },
       {
         type   = "metric"
-        x      = 12
+        x      = 16
         y      = 12
-        width  = 6
+        width  = 8
         height = 6
         properties = {
-          title  = "RDS · FreeableMemory"
+          title  = "DB · NetworkOut (respuestas a la app + replicacion)"
           region = var.aws_region
-          stat   = "Average"
+          stat   = "Sum"
           period = 60
           view   = "timeSeries"
           metrics = [
-            ["AWS/RDS", "FreeableMemory", "DBInstanceIdentifier", aws_rds_cluster_instance.this[0].identifier]
-          ]
-        }
-      },
-      {
-        type   = "metric"
-        x      = 18
-        y      = 12
-        width  = 6
-        height = 6
-        properties = {
-          title  = "RDS · Read & Write Latency"
-          region = var.aws_region
-          stat   = "Average"
-          period = 60
-          view   = "timeSeries"
-          metrics = [
-            ["AWS/RDS", "ReadLatency", "DBInstanceIdentifier", aws_rds_cluster_instance.this[0].identifier],
-            [".", "WriteLatency", ".", "."]
+            ["AWS/EC2", "NetworkOut", "InstanceId", aws_instance.db_primary.id, { label = "primary" }],
+            ["...", aws_instance.db_replica.id, { label = "replica" }]
           ]
         }
       },

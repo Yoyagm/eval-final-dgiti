@@ -101,16 +101,10 @@ variable "instance_profile_name" {
 ###############################################################################
 # Base de datos
 ###############################################################################
-variable "db_instance_class" {
-  description = "Tipo de instancia RDS"
+variable "db_instance_class_ec2" {
+  description = "Tipo de instancia EC2 para PostgreSQL (primary y replica)"
   type        = string
-  default     = "db.t3.micro"
-}
-
-variable "db_allocated_storage" {
-  description = "Storage RDS en GB"
-  type        = number
-  default     = 20
+  default     = "t3.micro"
 }
 
 variable "db_name" {
@@ -120,16 +114,10 @@ variable "db_name" {
 }
 
 variable "db_username" {
-  description = "Usuario master de RDS"
+  description = "Usuario master de PostgreSQL"
   type        = string
   default     = "appuser"
   sensitive   = true
-}
-
-variable "db_engine_version" {
-  description = "Versión del engine Aurora PostgreSQL"
-  type        = string
-  default     = "15.10"
 }
 
 ###############################################################################

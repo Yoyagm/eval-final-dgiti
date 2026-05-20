@@ -51,15 +51,21 @@ output "cloudwatch_log_group" {
   value       = aws_cloudwatch_log_group.app.name
 }
 
-output "rds_endpoint" {
-  description = "Endpoint privado de RDS PostgreSQL (no accesible desde Internet)"
-  value       = aws_rds_cluster.this.endpoint
+output "db_primary_private_ip" {
+  description = "IP privada del PostgreSQL primary (no accesible desde Internet)"
+  value       = aws_instance.db_primary.private_ip
   sensitive   = true
 }
 
-output "rds_database_name" {
-  description = "Nombre de la base de datos creada"
-  value       = aws_rds_cluster.this.database_name
+output "db_replica_private_ip" {
+  description = "IP privada del PostgreSQL replica (streaming replication)"
+  value       = aws_instance.db_replica.private_ip
+  sensitive   = true
+}
+
+output "db_database_name" {
+  description = "Nombre de la base de datos"
+  value       = var.db_name
 }
 
 output "db_password" {
