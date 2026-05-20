@@ -1,0 +1,18 @@
+# Terraform state y locks
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+.terraform/
+.terraform.lock.hcl
+
+# Variables locales con valores reales (NUNCA al repo)
+terraform.tfvars
+*.auto.tfvars
+
+# Logs y backups
+crash.log
+crash.*.log
+
+# Plan files
+*.tfplan
+tfplan

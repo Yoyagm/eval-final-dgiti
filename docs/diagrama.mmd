@@ -1,0 +1,93 @@
+%%{init: {'theme':'base', 'themeVariables': {'primaryColor':'#FF9900','primaryTextColor':'#232F3E','lineColor':'#232F3E','secondaryColor':'#FFFFFF'}}}%%
+flowchart TB
+    %% =========================
+    %% Usuarios y flujo CI/CD externos
+    %% =========================
+    User(["👤 Usuario final<br/>(navegador / Postman / curl)"])
+    Dev(["👨‍💻 Developer<br/>git push main"])
+    GH["🐙 GitHub Actions<br/>lint → test → build"]
+
+    %% =========================
+    %% AWS Cloud
+    %% =========================
+    subgraph AWS["☁️ AWS Cloud — us-east-1"]
+        ECR["📦 Amazon ECR<br/>eval-final-dgiti:tag"]
+        CW["📊 CloudWatch<br/>Logs + Metrics + Dashboard"]
+
+        subgraph VPC["🌐 VPC 10.0.0.0/16"]
+            IGW["🌍 Internet Gateway"]
+
+            subgraph AZA["🟦 AZ us-east-1a"]
+                subgraph PubA["🟢 Subred pública 10.0.1.0/24"]
+                    ALB1["⚖️ Application<br/>Load Balancer"]
+                    NAT["🔁 NAT Gateway"]
+                end
+                subgraph PrivA["🔒 Subred privada 10.0.11.0/24"]
+                    EC2A["💻 EC2 t3.micro<br/>FastAPI :8000"]
+                    RDSA["🗄️ RDS Postgres<br/>(primary)"]
+                end
+            end
+
+            subgraph AZB["🟦 AZ us-east-1b"]
+                subgraph PubB["🟢 Subred pública 10.0.2.0/24"]
+                    ALB2["⚖️ ALB (multi-AZ)"]
+                end
+                subgraph PrivB["🔒 Subred privada 10.0.12.0/24"]
+                    EC2B["💻 EC2 t3.micro<br/>FastAPI :8000"]
+                    RDSB["🗄️ RDS Postgres<br/>(standby Multi-AZ)"]
+                end
+            end
+        end
+
+        subgraph SGs["🛡️ Security Groups"]
+            SG1["alb-sg<br/>:80 ← 0.0.0.0/0"]
+            SG2["app-sg<br/>:8000 ← alb-sg"]
+            SG3["db-sg<br/>:5432 ← app-sg"]
+        end
+    end
+
+    %% =========================
+    %% Flujo de tráfico (usuario)
+    %% =========================
+    User -- "HTTP :80" --> IGW
+    IGW --> ALB1
+    IGW --> ALB2
+    ALB1 -- "HTTP :8000" --> EC2A
+    ALB1 -- "HTTP :8000" --> EC2B
+    ALB2 -. balanceo .-> EC2A
+    ALB2 -. balanceo .-> EC2B
+    EC2A -- "TCP :5432" --> RDSA
+    EC2B -- "TCP :5432" --> RDSA
+    RDSA <-. "réplica síncrona" .-> RDSB
+    EC2A -- egress --> NAT
+    EC2B -- egress --> NAT
+    NAT --> IGW
+
+    %% =========================
+    %% Flujo de despliegue CI/CD
+    %% =========================
+    Dev --> GH
+    GH -- "docker push" --> ECR
+    EC2A -. "docker pull" .-> ECR
+    EC2B -. "docker pull" .-> ECR
+
+    %% =========================
+    %% Observabilidad
+    %% =========================
+    EC2A -. logs/metrics .-> CW
+    EC2B -. logs/metrics .-> CW
+    ALB1 -. metrics .-> CW
+    RDSA -. metrics .-> CW
+
+    %% =========================
+    %% Estilos
+    %% =========================
+    classDef aws fill:#FF9900,stroke:#232F3E,stroke-width:2px,color:#232F3E
+    classDef priv fill:#E8F4FD,stroke:#1976D2,stroke-width:1px
+    classDef pub fill:#E8F5E9,stroke:#2E7D32,stroke-width:1px
+    classDef sg fill:#FFEBEE,stroke:#C62828,stroke-width:1px
+
+    class ALB1,ALB2,EC2A,EC2B,RDSA,RDSB,ECR,CW,NAT,IGW aws
+    class PrivA,PrivB priv
+    class PubA,PubB pub
+    class SG1,SG2,SG3 sg

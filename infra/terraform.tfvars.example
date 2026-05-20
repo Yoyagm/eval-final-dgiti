@@ -1,0 +1,27 @@
+# Copia este archivo como terraform.tfvars y ajusta los valores que necesites.
+# El archivo terraform.tfvars está en .gitignore, NO lo subas al repo.
+
+project_name = "eval-final-dgiti"
+environment  = "prod"
+aws_region   = "us-east-1"
+
+vpc_cidr             = "10.0.0.0/16"
+public_subnet_cidrs  = ["10.0.1.0/24", "10.0.2.0/24"]
+private_subnet_cidrs = ["10.0.11.0/24", "10.0.12.0/24"]
+availability_zones   = ["us-east-1a", "us-east-1b"]
+
+instance_type        = "t3.micro"
+asg_min_size         = 2
+asg_desired_capacity = 2
+asg_max_size         = 4
+app_port             = 8000
+
+instance_profile_name = "LabInstanceProfile"
+
+db_instance_class   = "db.t3.micro"
+db_allocated_storage = 20
+db_name             = "items"
+db_username         = "appuser"
+db_engine_version   = "15.7"
+
+ecr_image_tag = "latest"

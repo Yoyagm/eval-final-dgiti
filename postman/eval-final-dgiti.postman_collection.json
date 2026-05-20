@@ -1,0 +1,222 @@
+{
+  "info": {
+    "name": "eval-final-dgiti",
+    "description": "Colección de validación del servicio FastAPI desplegado en AWS (UPB DGITI). Configura la variable {{base_url}} en el environment para apuntar al ALB DNS antes de ejecutar.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "eval-final-dgiti-collection"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://REEMPLAZAR-CON-ALB-DNS",
+      "type": "string"
+    },
+    {
+      "key": "item_id",
+      "value": "1",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "01 — Root del servicio",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('Cuerpo incluye service y docs', () => {",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.service).to.eql('eval-final-dgiti');",
+              "  pm.expect(body.docs).to.eql('/docs');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Accept", "value": "application/json" }],
+        "url": { "raw": "{{base_url}}/", "host": ["{{base_url}}"], "path": [""] }
+      }
+    },
+    {
+      "name": "02 — Health check",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('DB connected', () => {",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.data.status).to.eql('ok');",
+              "  pm.expect(body.data.db).to.eql('connected');",
+              "});",
+              "pm.test('Latencia < 1500ms', () => pm.expect(pm.response.responseTime).to.be.below(1500));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Accept", "value": "application/json" }],
+        "url": { "raw": "{{base_url}}/health", "host": ["{{base_url}}"], "path": ["health"] }
+      }
+    },
+    {
+      "name": "03 — OpenAPI schema",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('Tiene paths /health y /api/items', () => {",
+              "  const schema = pm.response.json();",
+              "  pm.expect(schema.paths).to.have.property('/health');",
+              "  pm.expect(schema.paths).to.have.property('/api/items');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": { "raw": "{{base_url}}/openapi.json", "host": ["{{base_url}}"], "path": ["openapi.json"] }
+      }
+    },
+    {
+      "name": "04 — Listar items",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('Tiene data y meta', () => {",
+              "  const body = pm.response.json();",
+              "  pm.expect(body).to.have.property('data');",
+              "  pm.expect(body).to.have.property('meta');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/api/items?limit=10&offset=0",
+          "host": ["{{base_url}}"],
+          "path": ["api", "items"],
+          "query": [
+            { "key": "limit", "value": "10" },
+            { "key": "offset", "value": "0" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "05 — Crear item",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 201', () => pm.response.to.have.status(201));",
+              "const body = pm.response.json();",
+              "pm.test('Devuelve id generado', () => pm.expect(body.data.id).to.be.a('number'));",
+              "pm.collectionVariables.set('item_id', body.data.id);",
+              "console.log('item_id guardado:', body.data.id);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Accept", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Postman demo item\",\n  \"description\": \"creado desde la colección eval-final-dgiti\"\n}"
+        },
+        "url": { "raw": "{{base_url}}/api/items", "host": ["{{base_url}}"], "path": ["api", "items"] }
+      }
+    },
+    {
+      "name": "06 — Obtener item creado",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('Name == Postman demo item', () => {",
+              "  pm.expect(pm.response.json().data.name).to.eql('Postman demo item');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/api/items/{{item_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["api", "items", "{{item_id}}"]
+        }
+      }
+    },
+    {
+      "name": "07 — Validación pydantic (name vacío → 422)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 422', () => pm.response.to.have.status(422));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"name\": \"\"\n}" },
+        "url": { "raw": "{{base_url}}/api/items", "host": ["{{base_url}}"], "path": ["api", "items"] }
+      }
+    },
+    {
+      "name": "08 — Item inexistente (404)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 404', () => pm.response.to.have.status(404));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/api/items/9999999",
+          "host": ["{{base_url}}"],
+          "path": ["api", "items", "9999999"]
+        }
+      }
+    }
+  ]
+}

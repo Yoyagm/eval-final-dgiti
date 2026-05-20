@@ -1,0 +1,21 @@
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+exclude = [".venv", "venv", "build", "dist", ".git", "__pycache__"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "B", "UP", "N", "ASYNC"]
+ignore = [
+  "E501",   # Long lines (cubierto por formatter)
+  "B008",   # Depends(...) en defaults es el patrón estándar de FastAPI
+  "N806",   # SessionLocal: convención de SQLAlchemy
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --cov=app --cov-report=term-missing --cov-report=xml"
+
+[tool.coverage.run]
+source = ["app"]
+omit = ["app/__init__.py", "app/routers/__init__.py"]
