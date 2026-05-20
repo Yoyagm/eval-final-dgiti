@@ -108,7 +108,7 @@ Diagrama:  OK
 | 8 | `http://eval-final-dgiti-alb-217333176.us-east-1.elb.amazonaws.com/docs` | Servicio |
 | 9 | `https://github.com/Yoyagm/eval-final-dgiti/settings/secrets/actions` | CI/CD |
 | 10 | `https://github.com/Yoyagm/eval-final-dgiti/actions` | CI/CD |
-| 11 | `https://github.com/users/Yoyagm/packages/container/eval-final-dgiti` | CI/CD (registry) |
+| 11 | `https://github.com/Yoyagm/eval-final-dgiti/pkgs/container/eval-final-dgiti` | CI/CD (registry, accedido desde el repo) |
 | 12 | El Dashboard CloudWatch — pega `terraform output -raw cloudwatch_dashboard_url` | Desempeño |
 
 ## 2.2 · Terminal
